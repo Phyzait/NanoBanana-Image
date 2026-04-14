@@ -1,19 +1,49 @@
 // constants.ts — NanoBanana Studio 配置
 
-import type { ImageOptimizePreset } from './types';
+import type { ImageOptimizePreset, ImageModelConfig, OptimizeConfig } from './types';
 
 export const APP_NAME = 'NanoBanana Studio';
-export const APP_VERSION = '1.0.0';
+export const APP_VERSION = '1.1.0';
 
 // ── API 配置 ──────────────────────────────────────────────
 export const DEFAULT_BASE_URL = 'https://api.ikuncode.cc';
-export const NANO_MODEL_PATH = '/v1beta/models/gemini-3-pro-image-preview:generateContent';
-export const OPTIMIZE_MODEL = 'gemini-3-flash-preview';
+
+export function normalizeBaseUrl(baseUrl?: string): string {
+  return (baseUrl?.trim() || DEFAULT_BASE_URL).replace(/\/+$/, '');
+}
+
+// ── 双模型配置 ────────────────────────────────────────────
+export const IMAGE_MODELS: ImageModelConfig[] = [
+  {
+    id: 'nano-banana',
+    name: 'NanoBanana Pro',
+    description: 'Gemini 3 Pro · 效果最佳 · 较慢',
+    modelPath: '/v1beta/models/gemini-3-pro-image-preview:generateContent',
+  },
+  {
+    id: 'nano-banana-2',
+    name: 'NanoBanana 2',
+    description: 'Gemini 3.1 Flash · 速度快 · 价格低',
+    modelPath: '/v1beta/models/gemini-3.1-flash-image-preview:generateContent',
+  },
+];
+
+// ── 默认优化 API 配置 ─────────────────────────────────────
+export const DEFAULT_OPTIMIZE_CONFIG: OptimizeConfig = {
+  baseUrl: 'https://api.ikuncode.cc/v1',
+  apiKey: '',
+  model: 'gemini-3-flash-preview',
+};
 
 // ── localStorage keys ─────────────────────────────────────
 export const LS_API_KEY = 'nanoBananaApiKey';
+export const LS_IMAGE_BASE_URL = 'nanoBananaImageBaseUrl';
 export const LS_THEME = 'nanoBananaTheme';
 export const LS_GALLERY = 'nanoBananaGallery';
+export const LS_MODEL = 'nanoBananaModel';
+export const LS_OPTIMIZE_CONFIG = 'nanoBananaOptimizeConfig';
+export const LS_CONVERSATIONS = 'nanoBananaConversations';
+export const LS_ACTIVE_CONV = 'nanoBananaActiveConv';
 
 // ── 宽高比选项 ────────────────────────────────────────────
 export const ASPECT_RATIOS = [

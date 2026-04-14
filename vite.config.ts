@@ -64,7 +64,6 @@ export default defineConfig({
       output: {
         manualChunks: {
           'react-vendor': ['react', 'react-dom'],
-          'google-genai': ['@google/genai'],
         },
       },
     },

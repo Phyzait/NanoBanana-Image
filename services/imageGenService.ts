@@ -1,9 +1,8 @@
 // services/imageGenService.ts
-// NanoBanana 图像生成服务 — 单引擎，用户自带 API Key
+// NanoBanana 图像生成服务 — 双模型，提示词优化走 OpenAI 兼容格式
 
-import type { ImageGenRequest, ImageGenResult } from '../types';
-import { DEFAULT_BASE_URL, NANO_MODEL_PATH, OPTIMIZE_MODEL, IMAGE_OPTIMIZE_PRESETS, STYLE_PRESETS } from '../constants';
-import { GoogleGenAI } from '@google/genai';
+import type { ImageGenRequest, ImageGenResult, OptimizeConfig } from '../types';
+import { IMAGE_MODELS, IMAGE_OPTIMIZE_PRESETS, normalizeBaseUrl } from '../constants';
 
 // ── 通用工具 ──────────────────────────────────────────────
 
@@ -34,29 +33,54 @@ async function fetchWithRetry(
   throw lastError ?? new Error('Request failed after retries');
 }
 
-// ── 提示词优化 ────────────────────────────────────────────
+// ── 提示词优化（OpenAI 兼容格式） ─────────────────────────
 
 export async function optimizePrompt(
-  apiKey: string,
+  config: OptimizeConfig,
   rawPrompt: string,
   presetId: string,
   signal?: AbortSignal,
 ): Promise<string> {
+  if (!config.baseUrl || !config.apiKey) {
+    throw new Error('未配置提示词优化 API');
+  }
+
   const preset = IMAGE_OPTIMIZE_PRESETS.find(p => p.id === presetId) ?? IMAGE_OPTIMIZE_PRESETS[0];
 
-  const ai = new GoogleGenAI({
-    apiKey,
-    httpOptions: { baseUrl: DEFAULT_BASE_URL },
+  // 规范化 baseUrl — 确保末尾无斜杠
+  const baseUrl = normalizeBaseUrl(config.baseUrl);
+  const url = `${baseUrl}/chat/completions`;
+
+  const body = JSON.stringify({
+    model: config.model,
+    messages: [
+      { role: 'user', content: `${preset.instruction}${rawPrompt}` },
+    ],
+    temperature: 0.7,
+    max_tokens: 2048,
   });
 
-  const response = await ai.models.generateContent({
-    model: OPTIMIZE_MODEL,
-    contents: [{ role: 'user', parts: [{ text: `${preset.instruction}${rawPrompt}` }] }],
-  });
+  const res = await fetchWithRetry(
+    url,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${config.apiKey}`,
+      },
+      body,
+    },
+    1,
+    signal,
+  );
 
-  if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new Error(`优化 API 错误 ${res.status}: ${errText}`);
+  }
 
-  const text = response.text?.trim();
+  const json = await res.json();
+  const text = json?.choices?.[0]?.message?.content?.trim();
   if (!text) throw new Error('提示词优化返回为空');
   return text;
 }
@@ -65,31 +89,31 @@ export async function optimizePrompt(
 
 export async function generateImage(
   apiKey: string,
+  baseUrl: string,
   req: ImageGenRequest,
+  optimizeConfig: OptimizeConfig | null,
   signal?: AbortSignal,
 ): Promise<ImageGenResult> {
   const start = Date.now();
 
-  // 1. 提示词优化（如果开启）
+  // 1. 查找模型配置
+  const modelCfg = IMAGE_MODELS.find(m => m.id === req.model) ?? IMAGE_MODELS[0];
+
+  // 2. 提示词优化（如果开启且有配置）
   let finalPrompt = req.prompt;
   let optimizedPrompt: string | undefined;
 
-  // 风格前缀
-  const style = STYLE_PRESETS.find(s => s.id !== 'none' && req.prompt.length > 0) ? undefined : undefined;
-  // 由前端在提交前拼接风格前缀，这里不额外处理
-
-  if (req.optimizePrompt && req.optimizePresetId) {
+  if (req.optimizePrompt && req.optimizePresetId && optimizeConfig?.apiKey) {
     try {
-      optimizedPrompt = await optimizePrompt(apiKey, finalPrompt, req.optimizePresetId, signal);
+      optimizedPrompt = await optimizePrompt(optimizeConfig, finalPrompt, req.optimizePresetId, signal);
       finalPrompt = optimizedPrompt;
     } catch (e: unknown) {
       if (e instanceof DOMException && e.name === 'AbortError') throw e;
-      // 优化失败时使用原始提示词
       console.warn('[NanoBanana] 提示词优化失败，使用原始提示词:', e);
     }
   }
 
-  // 2. 构建请求体
+  // 3. 构建请求体
   const parts: Array<Record<string, unknown>> = [{ text: finalPrompt }];
 
   if (req.mode === 'img2img' && req.inputImage) {
@@ -121,8 +145,8 @@ export async function generateImage(
     },
   });
 
-  // 3. 调用 API
-  const url = `${DEFAULT_BASE_URL}${NANO_MODEL_PATH}`;
+  // 4. 调用 API
+  const url = `${normalizeBaseUrl(baseUrl)}${modelCfg.modelPath}`;
   const timeoutMs = req.size === '4K' ? 1200000 : req.size === '1K' ? 360000 : 600000;
 
   const controller = new AbortController();
