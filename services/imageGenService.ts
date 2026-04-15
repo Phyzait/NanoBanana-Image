@@ -158,9 +158,10 @@ export async function generateImage(
 
   contents.push({ role: 'user', parts: currentParts });
 
-  const imageConfig: Record<string, string> = {
-    aspectRatio: req.aspectRatio || '1:1',
-  };
+  const imageConfig: Record<string, string> = {};
+  if (req.aspectRatio && req.aspectRatio !== 'Auto') {
+    imageConfig.aspectRatio = req.aspectRatio;
+  }
   if (req.size) {
     imageConfig.imageSize = req.size;
   }
