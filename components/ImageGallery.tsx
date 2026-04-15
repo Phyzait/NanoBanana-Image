@@ -12,6 +12,7 @@ interface ImageGalleryProps {
   isGenerating: boolean;
   currentPrompt?: string;
   currentInputImages?: Array<{ data: string; mimeType: string }>;
+  generatingStartTime?: number;
   onEditItem?: (itemId: string, newPrompt: string, inputImages?: Array<{ data: string; mimeType: string }>) => void;
   onRegenerateItem?: (itemId: string) => void;
 }
@@ -435,32 +436,32 @@ const GalleryCard: React.FC<{
 
 /* ── 主组件 ────────────────────────────────── */
 
-const ImageGallery: React.FC<ImageGalleryProps> = ({ theme, items, isGenerating, currentPrompt, currentInputImages, onEditItem, onRegenerateItem }) => {
+const ImageGallery: React.FC<ImageGalleryProps> = ({ theme, items, isGenerating, currentPrompt, currentInputImages, generatingStartTime, onEditItem, onRegenerateItem }) => {
   const scrollRef = useRef<HTMLDivElement>(null);
   const isDark = theme === 'dark';
   const [previewSrc, setPreviewSrc] = useState<string | null>(null);
 
-  // ── 实时计时器
+  // ── 实时计时器（基于会话隔离的 startTime）
   const [elapsedTime, setElapsedTime] = useState(0);
   const timerRef = useRef<number>(0);
 
   useEffect(() => {
-    if (isGenerating) {
-      setElapsedTime(0);
-      const startTime = performance.now();
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = 0;
+    }
+    if (isGenerating && generatingStartTime) {
+      setElapsedTime(performance.now() - generatingStartTime);
       timerRef.current = window.setInterval(() => {
-        setElapsedTime(performance.now() - startTime);
+        setElapsedTime(performance.now() - generatingStartTime);
       }, 100);
     } else {
-      if (timerRef.current) {
-        clearInterval(timerRef.current);
-        timerRef.current = 0;
-      }
+      setElapsedTime(0);
     }
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
     };
-  }, [isGenerating]);
+  }, [isGenerating, generatingStartTime]);
 
   // 自动滚动到底部
   useEffect(() => {

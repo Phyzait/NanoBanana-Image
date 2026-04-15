@@ -43,8 +43,8 @@ const App: React.FC = () => {
       return raw ? JSON.parse(raw) : DEFAULT_OPTIMIZE_CONFIG;
     } catch { return DEFAULT_OPTIMIZE_CONFIG; }
   });
-  // 按对话隔离的生成状态 Map<convId, { prompt, inputImages, controller }>
-  const generatingMapRef = useRef<Map<string, { prompt: string; inputImages?: Array<{ data: string; mimeType: string }>; controller: AbortController }>>(new Map());
+  // 按对话隔离的生成状态 Map<convId, { prompt, inputImages, startTime, controller }>
+  const generatingMapRef = useRef<Map<string, { prompt: string; inputImages?: Array<{ data: string; mimeType: string }>; startTime: number; controller: AbortController }>>(new Map());
   const [generatingConvIds, setGeneratingConvIds] = useState<Set<string>>(new Set());
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [showSettingsMenu, setShowSettingsMenu] = useState(false);
@@ -102,6 +102,7 @@ const App: React.FC = () => {
   const activeGenState = activeConvId ? generatingMapRef.current.get(activeConvId) : undefined;
   const currentPrompt = activeGenState?.prompt;
   const currentInputImages = activeGenState?.inputImages;
+  const generatingStartTime = activeGenState?.startTime;
 
   // 所有对话总项数（用于侧栏显示）
   const totalItems = useMemo(() => conversations.reduce((s, c) => s + c.items.filter(it => !it.error).length, 0), [conversations]);
@@ -302,7 +303,7 @@ const App: React.FC = () => {
     const fullPrompt = prefix ? `${prefix}${params.prompt}` : params.prompt;
 
     const controller = new AbortController();
-    generatingMapRef.current.set(convId, { prompt: params.prompt, inputImages: params.inputImages, controller });
+    generatingMapRef.current.set(convId, { prompt: params.prompt, inputImages: params.inputImages, startTime: performance.now(), controller });
     setGeneratingConvIds(prev => new Set(prev).add(convId));
 
     try {
@@ -530,6 +531,7 @@ const App: React.FC = () => {
           isGenerating={isGenerating}
           currentPrompt={currentPrompt}
           currentInputImages={currentInputImages}
+          generatingStartTime={generatingStartTime}
           onEditItem={handleEditItem}
           onRegenerateItem={handleRegenerateItem}
         />
