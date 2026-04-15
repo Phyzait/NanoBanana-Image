@@ -276,6 +276,13 @@ const App: React.FC = () => {
     // 如果该对话已在生成，不重复触发
     if (generatingMapRef.current.has(convId)) return;
 
+    // 立即更新会话标题（不等待 API 响应）
+    setConversations(prev => prev.map(c =>
+      c.id === convId && c.items.length === 0
+        ? { ...c, title: params.prompt.slice(0, 30) || '新对话', updatedAt: Date.now() }
+        : c
+    ));
+
     const style = STYLE_PRESETS.find(s => s.id === params.styleId);
     const prefix = style?.prefix || '';
     const fullPrompt = prefix ? `${prefix}${params.prompt}` : params.prompt;
@@ -340,7 +347,6 @@ const App: React.FC = () => {
                 ...c,
                 items: [...c.items, item],
                 updatedAt: Date.now(),
-                title: c.items.length === 0 ? params.prompt.slice(0, 30) : c.title,
               }
             : c
         ));
@@ -364,7 +370,6 @@ const App: React.FC = () => {
                 ...c,
                 items: [...c.items, errorItem],
                 updatedAt: Date.now(),
-                title: c.items.length === 0 ? params.prompt.slice(0, 30) : c.title,
               }
             : c
         ));
@@ -391,7 +396,6 @@ const App: React.FC = () => {
               ...c,
               items: [...c.items, errorItem],
               updatedAt: Date.now(),
-              title: c.items.length === 0 ? params.prompt.slice(0, 30) : c.title,
             }
           : c
       ));
