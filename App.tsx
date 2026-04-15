@@ -397,6 +397,39 @@ const App: React.FC = () => {
     }
   }, [apiKey, imageBaseUrl, isGenerating, model, showMessage, activeConvId]);
 
+  const handleEditItem = useCallback(async (itemId: string, newPrompt: string) => {
+    if (!activeConvId || isGenerating) return;
+    const conv = conversations.find(c => c.id === activeConvId);
+    if (!conv) return;
+
+    const idx = conv.items.findIndex(g => g.id === itemId);
+    if (idx === -1) return;
+
+    // 截断：删除该 item 及之后的所有 items，清理 IndexedDB 图片
+    const removedItems = conv.items.slice(idx);
+    for (const it of removedItems) {
+      if (it.imageRef) deleteImage(it.imageRef).catch(() => {});
+      if (it.inputImageRef) deleteImage(it.inputImageRef).catch(() => {});
+    }
+
+    const keptItems = conv.items.slice(0, idx);
+    setConversations(prev => prev.map(c =>
+      c.id === activeConvId
+        ? { ...c, items: keptItems, updatedAt: Date.now() }
+        : c
+    ));
+
+    // 用编辑后的 prompt 和原 item 参数重新生成
+    const editedItem = conv.items[idx];
+    handleGenerate({
+      prompt: newPrompt,
+      mode: editedItem.mode,
+      aspectRatio: editedItem.aspectRatio,
+      size: editedItem.size,
+      styleId: 'none',
+    });
+  }, [activeConvId, conversations, isGenerating, handleGenerate]);
+
   // ── Render ─────────────────────────────────────────────
 
   if (!apiKey || showApiSetup) {
@@ -449,6 +482,7 @@ const App: React.FC = () => {
           isGenerating={isGenerating}
           currentPrompt={currentPrompt}
           currentInputImage={currentInputImage}
+          onEditItem={handleEditItem}
         />
         <PromptBar
           theme={theme}

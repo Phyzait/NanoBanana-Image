@@ -4,7 +4,7 @@ import React, { useEffect, useRef, useState, useCallback } from 'react';
 import type { Theme, GalleryItem } from '../types';
 import { IMAGE_MODELS } from '../constants';
 import { loadImage } from '../services/imageStore';
-import { ArrowDownTrayIcon, XMarkIcon } from './Icons';
+import { ArrowDownTrayIcon, XMarkIcon, PencilIcon, CheckIcon } from './Icons';
 
 interface ImageGalleryProps {
   theme: Theme;
@@ -12,6 +12,7 @@ interface ImageGalleryProps {
   isGenerating: boolean;
   currentPrompt?: string;
   currentInputImage?: string;
+  onEditItem?: (itemId: string, newPrompt: string) => void;
 }
 
 /* ── 成功小动画 — 对勾弹出 + 星星粒子 ──────── */
@@ -87,9 +88,18 @@ const ImageLightbox: React.FC<{ src: string | null; onClose: () => void }> = ({ 
 
 /* ── 单个图片卡片 ──────────────────────────── */
 
-const GalleryCard: React.FC<{ item: GalleryItem; theme: Theme; onPreview: (src: string) => void }> = ({ item, theme, onPreview }) => {
+const GalleryCard: React.FC<{
+  item: GalleryItem;
+  theme: Theme;
+  onPreview: (src: string) => void;
+  onEdit?: (itemId: string, newPrompt: string) => void;
+  isGenerating: boolean;
+}> = ({ item, theme, onPreview, onEdit, isGenerating }) => {
   const [imgSrc, setImgSrc] = useState<string | null>(null);
   const [inputImgSrc, setInputImgSrc] = useState<string | null>(null);
+  const [isEditing, setIsEditing] = useState(false);
+  const [editText, setEditText] = useState('');
+  const editRef = useRef<HTMLTextAreaElement>(null);
   const isDark = theme === 'dark';
   const isError = !!item.error;
 
@@ -115,31 +125,122 @@ const GalleryCard: React.FC<{ item: GalleryItem; theme: Theme; onPreview: (src: 
     ? `${item.elapsed}ms`
     : `${(item.elapsed / 1000).toFixed(1)}s`;
 
+  const handleStartEdit = useCallback(() => {
+    setEditText(item.prompt);
+    setIsEditing(true);
+    requestAnimationFrame(() => {
+      if (editRef.current) {
+        editRef.current.focus();
+        editRef.current.style.height = 'auto';
+        editRef.current.style.height = `${editRef.current.scrollHeight}px`;
+      }
+    });
+  }, [item.prompt]);
+
+  const handleConfirmEdit = useCallback(() => {
+    const trimmed = editText.trim();
+    if (!trimmed || !onEdit) return;
+    setIsEditing(false);
+    onEdit(item.id, trimmed);
+  }, [editText, onEdit, item.id]);
+
+  const handleCancelEdit = useCallback(() => {
+    setIsEditing(false);
+    setEditText('');
+  }, []);
+
+  const handleEditKeyDown = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Enter' && !e.shiftKey && !(e as unknown as { isComposing: boolean }).isComposing && e.keyCode !== 229) {
+      e.preventDefault();
+      handleConfirmEdit();
+    }
+    if (e.key === 'Escape') {
+      handleCancelEdit();
+    }
+  }, [handleConfirmEdit, handleCancelEdit]);
+
   return (
     <div className="animate-fadeIn">
       {/* 用户消息气泡 */}
-      <div className="flex justify-end mb-2">
+      <div className="flex justify-end mb-2 group/msg items-start">
+        {/* 编辑按钮 — 气泡左侧，hover 显示 */}
+        {!isEditing && !isGenerating && onEdit && (
+          <button
+            onClick={handleStartEdit}
+            className={`self-center mr-1 p-1 rounded-md opacity-0 group-hover/msg:opacity-100 transition-opacity flex-shrink-0 ${
+              isDark ? 'text-gray-500 hover:text-gray-300 hover:bg-gray-700/50' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'
+            }`}
+            title="编辑消息"
+          >
+            <PencilIcon className="w-3.5 h-3.5" />
+          </button>
+        )}
         <div className={`max-w-[85%] sm:max-w-[80%] rounded-2xl rounded-tr-md px-3 sm:px-4 py-2 sm:py-2.5 text-xs sm:text-sm ${
           isDark ? 'bg-amber-900/30 text-amber-100' : 'bg-amber-50 text-amber-900'
         }`}>
-          <p className="whitespace-pre-wrap break-words">{item.prompt}</p>
-          {/* img2img 输入图展示 */}
-          {inputImgSrc && (
-            <div className="mt-2">
-              <img
-                src={inputImgSrc}
-                alt="参考图"
-                className="h-20 sm:h-24 rounded-lg object-cover cursor-pointer hover:opacity-80 transition-opacity"
-                onClick={() => onPreview(inputImgSrc)}
+          {isEditing ? (
+            <div>
+              <textarea
+                ref={editRef}
+                value={editText}
+                onChange={e => {
+                  setEditText(e.target.value);
+                  e.target.style.height = 'auto';
+                  e.target.style.height = `${e.target.scrollHeight}px`;
+                }}
+                onKeyDown={handleEditKeyDown}
+                className={`w-full resize-none rounded-lg px-2 py-1.5 text-xs sm:text-sm focus:outline-none focus:ring-1 ${
+                  isDark
+                    ? 'bg-[#1e1e1c] text-amber-100 focus:ring-amber-500/50 border border-amber-500/30'
+                    : 'bg-white text-amber-900 focus:ring-amber-500/50 border border-amber-300'
+                }`}
+                style={{ minHeight: '36px' }}
               />
-              <span className={`text-[10px] mt-0.5 block ${isDark ? 'text-amber-400/50' : 'text-amber-600/50'}`}>参考图</span>
+              <div className="flex items-center justify-end gap-1.5 mt-1.5">
+                <button
+                  onClick={handleCancelEdit}
+                  className={`px-2 py-1 rounded-md text-[11px] transition-colors ${
+                    isDark ? 'text-gray-400 hover:bg-gray-700/50' : 'text-gray-500 hover:bg-gray-100'
+                  }`}
+                >
+                  取消
+                </button>
+                <button
+                  onClick={handleConfirmEdit}
+                  disabled={!editText.trim()}
+                  className={`px-2 py-1 rounded-md text-[11px] font-medium transition-colors flex items-center gap-1 ${
+                    editText.trim()
+                      ? (isDark ? 'bg-amber-600 text-white hover:bg-amber-500' : 'bg-amber-500 text-white hover:bg-amber-600')
+                      : (isDark ? 'bg-gray-700 text-gray-500' : 'bg-gray-200 text-gray-400')
+                  }`}
+                >
+                  <CheckIcon className="w-3 h-3" />
+                  发送
+                </button>
+              </div>
             </div>
+          ) : (
+            <>
+              <p className="whitespace-pre-wrap break-words">{item.prompt}</p>
+              {/* img2img 输入图展示 */}
+              {inputImgSrc && (
+                <div className="mt-2">
+                  <img
+                    src={inputImgSrc}
+                    alt="参考图"
+                    className="h-20 sm:h-24 rounded-lg object-cover cursor-pointer hover:opacity-80 transition-opacity"
+                    onClick={() => onPreview(inputImgSrc)}
+                  />
+                  <span className={`text-[10px] mt-0.5 block ${isDark ? 'text-amber-400/50' : 'text-amber-600/50'}`}>参考图</span>
+                </div>
+              )}
+              <div className={`flex items-center gap-2 mt-1 sm:mt-1.5 text-[10px] ${isDark ? 'text-amber-400/60' : 'text-amber-600/60'}`}>
+                <span>{item.aspectRatio}</span>
+                <span>{item.size}</span>
+                {item.mode === 'img2img' && <span>图生图</span>}
+              </div>
+            </>
           )}
-          <div className={`flex items-center gap-2 mt-1 sm:mt-1.5 text-[10px] ${isDark ? 'text-amber-400/60' : 'text-amber-600/60'}`}>
-            <span>{item.aspectRatio}</span>
-            <span>{item.size}</span>
-            {item.mode === 'img2img' && <span>图生图</span>}
-          </div>
         </div>
       </div>
 
@@ -240,7 +341,7 @@ const GalleryCard: React.FC<{ item: GalleryItem; theme: Theme; onPreview: (src: 
 
 /* ── 主组件 ────────────────────────────────── */
 
-const ImageGallery: React.FC<ImageGalleryProps> = ({ theme, items, isGenerating, currentPrompt, currentInputImage }) => {
+const ImageGallery: React.FC<ImageGalleryProps> = ({ theme, items, isGenerating, currentPrompt, currentInputImage, onEditItem }) => {
   const scrollRef = useRef<HTMLDivElement>(null);
   const isDark = theme === 'dark';
   const [previewSrc, setPreviewSrc] = useState<string | null>(null);
@@ -299,7 +400,7 @@ const ImageGallery: React.FC<ImageGalleryProps> = ({ theme, items, isGenerating,
 
           {/* 图片列表 */}
           {items.map(item => (
-            <GalleryCard key={item.id} item={item} theme={theme} onPreview={setPreviewSrc} />
+            <GalleryCard key={item.id} item={item} theme={theme} onPreview={setPreviewSrc} onEdit={onEditItem} isGenerating={isGenerating} />
           ))}
 
           {/* 生成中状态 */}
