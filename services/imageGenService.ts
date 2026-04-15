@@ -214,7 +214,8 @@ export async function generateImage(
     }
 
     const json = await res.json();
-    const inlineData = json?.candidates?.[0]?.content?.parts?.[0]?.inlineData;
+    const parts = json?.candidates?.[0]?.content?.parts ?? [];
+    const inlineData = parts.find((p: Record<string, unknown>) => p.inlineData)?.inlineData as { data?: string; mimeType?: string } | undefined;
     if (!inlineData?.data) {
       return {
         success: false,
