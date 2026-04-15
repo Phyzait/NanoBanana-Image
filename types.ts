@@ -24,8 +24,7 @@ export interface ImageGenRequest {
   prompt: string;
   aspectRatio: string;
   size?: string;              // '1K' | '2K' | '4K'
-  inputImage?: string;        // img2img: base64 data URI
-  inputImageMimeType?: string;
+  inputImages?: Array<{ data: string; mimeType: string }>; // img2img: base64 data URIs
   optimizePrompt?: boolean;
   optimizePresetId?: string;
   /** 多轮对话历史（不含当前消息） */
@@ -67,8 +66,8 @@ export interface GalleryItem {
   /** IndexedDB 引用或 base64 data URI（生成失败时为空） */
   imageRef?: string;
   elapsed: number;
-  /** 输入图片引用（img2img） */
-  inputImageRef?: string;
+  /** 输入图片引用列表（img2img） */
+  inputImageRefs?: string[];
   /** 生成失败时的错误信息 */
   error?: string;
 }

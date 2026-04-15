@@ -43,8 +43,8 @@ const App: React.FC = () => {
       return raw ? JSON.parse(raw) : DEFAULT_OPTIMIZE_CONFIG;
     } catch { return DEFAULT_OPTIMIZE_CONFIG; }
   });
-  // 按对话隔离的生成状态 Map<convId, { prompt, inputImage, controller }>
-  const generatingMapRef = useRef<Map<string, { prompt: string; inputImage?: string; controller: AbortController }>>(new Map());
+  // 按对话隔离的生成状态 Map<convId, { prompt, inputImages, controller }>
+  const generatingMapRef = useRef<Map<string, { prompt: string; inputImages?: Array<{ data: string; mimeType: string }>; controller: AbortController }>>(new Map());
   const [generatingConvIds, setGeneratingConvIds] = useState<Set<string>>(new Set());
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [showSettingsMenu, setShowSettingsMenu] = useState(false);
@@ -55,7 +55,20 @@ const App: React.FC = () => {
   const [conversations, setConversations] = useState<Conversation[]>(() => {
     try {
       const raw = localStorage.getItem(LS_CONVERSATIONS);
-      if (raw) return JSON.parse(raw);
+      if (raw) {
+        const convs: Conversation[] = JSON.parse(raw);
+        // 兼容旧数据：inputImageRef → inputImageRefs
+        for (const c of convs) {
+          for (const it of c.items) {
+            const legacy = it as unknown as { inputImageRef?: string };
+            if (legacy.inputImageRef && !it.inputImageRefs) {
+              it.inputImageRefs = [legacy.inputImageRef];
+              delete legacy.inputImageRef;
+            }
+          }
+        }
+        return convs;
+      }
       // 迁移旧数据
       const oldGallery = localStorage.getItem(LS_GALLERY);
       if (oldGallery) {
@@ -88,7 +101,7 @@ const App: React.FC = () => {
   const isGenerating = activeConvId ? generatingConvIds.has(activeConvId) : false;
   const activeGenState = activeConvId ? generatingMapRef.current.get(activeConvId) : undefined;
   const currentPrompt = activeGenState?.prompt;
-  const currentInputImage = activeGenState?.inputImage;
+  const currentInputImages = activeGenState?.inputImages;
 
   // 所有对话总项数（用于侧栏显示）
   const totalItems = useMemo(() => conversations.reduce((s, c) => s + c.items.filter(it => !it.error).length, 0), [conversations]);
@@ -188,7 +201,7 @@ const App: React.FC = () => {
     // 清理 IndexedDB 图片
     for (const item of conv.items) {
       if (item.imageRef) deleteImage(item.imageRef).catch(() => {});
-      if (item.inputImageRef) deleteImage(item.inputImageRef).catch(() => {});
+      if (item.inputImageRefs) item.inputImageRefs.forEach(ref => deleteImage(ref).catch(() => {}));
     }
     setConversations(prev => prev.filter(c => c.id !== id));
     if (activeConvId === id) {
@@ -203,7 +216,7 @@ const App: React.FC = () => {
       for (const conv of conversations) {
         for (const item of conv.items) {
           if (item.imageRef) deleteImage(item.imageRef).catch(() => {});
-          if (item.inputImageRef) deleteImage(item.inputImageRef).catch(() => {});
+          if (item.inputImageRefs) item.inputImageRefs.forEach(ref => deleteImage(ref).catch(() => {}));
         }
       }
       setConversations([]);
@@ -218,7 +231,9 @@ const App: React.FC = () => {
     if (!item) return;
     try {
       if (item.imageRef) await deleteImage(item.imageRef);
-      if (item.inputImageRef) await deleteImage(item.inputImageRef);
+      if (item.inputImageRefs) {
+        for (const ref of item.inputImageRefs) await deleteImage(ref);
+      }
     } catch (e) {
       console.warn('删除图片失败:', e);
     }
@@ -251,8 +266,7 @@ const App: React.FC = () => {
     aspectRatio: string;
     size: string;
     styleId: string;
-    inputImage?: string;
-    inputImageMimeType?: string;
+    inputImages?: Array<{ data: string; mimeType: string }>;
   }) => {
     if (!apiKey) return;
 
@@ -288,13 +302,16 @@ const App: React.FC = () => {
     const fullPrompt = prefix ? `${prefix}${params.prompt}` : params.prompt;
 
     const controller = new AbortController();
-    generatingMapRef.current.set(convId, { prompt: params.prompt, inputImage: params.inputImage, controller });
+    generatingMapRef.current.set(convId, { prompt: params.prompt, inputImages: params.inputImages, controller });
     setGeneratingConvIds(prev => new Set(prev).add(convId));
 
     try {
-      let inputImageRef: string | undefined;
-      if (params.inputImage) {
-        inputImageRef = await saveImage(params.inputImage);
+      // 保存参考图到 IndexedDB
+      const inputImageRefs: string[] = [];
+      if (params.inputImages?.length) {
+        for (const img of params.inputImages) {
+          inputImageRefs.push(await saveImage(img.data));
+        }
       }
 
       // 构建多轮对话历史（仅包含成功生成的记录）
@@ -318,8 +335,7 @@ const App: React.FC = () => {
           prompt: fullPrompt,
           aspectRatio: params.aspectRatio,
           size: params.size,
-          inputImage: params.inputImage,
-          inputImageMimeType: params.inputImageMimeType,
+          inputImages: params.inputImages,
           history,
         },
         null,
@@ -339,7 +355,7 @@ const App: React.FC = () => {
           model,
           imageRef,
           elapsed: result.elapsed,
-          inputImageRef,
+          inputImageRefs: inputImageRefs.length > 0 ? inputImageRefs : undefined,
         };
         setConversations(prev => prev.map(c =>
           c.id === convId
@@ -361,7 +377,7 @@ const App: React.FC = () => {
           mode: params.mode,
           model,
           elapsed: result.elapsed,
-          inputImageRef,
+          inputImageRefs: inputImageRefs.length > 0 ? inputImageRefs : undefined,
           error: result.error || '未知错误',
         };
         setConversations(prev => prev.map(c =>
@@ -406,7 +422,7 @@ const App: React.FC = () => {
     }
   }, [apiKey, imageBaseUrl, model, showMessage, activeConvId, conversations]);
 
-  const handleEditItem = useCallback(async (itemId: string, newPrompt: string) => {
+  const handleEditItem = useCallback(async (itemId: string, newPrompt: string, inputImages?: Array<{ data: string; mimeType: string }>) => {
     if (!activeConvId || generatingConvIds.has(activeConvId)) return;
     const conv = conversations.find(c => c.id === activeConvId);
     if (!conv) return;
@@ -418,7 +434,7 @@ const App: React.FC = () => {
     const removedItems = conv.items.slice(idx);
     for (const it of removedItems) {
       if (it.imageRef) deleteImage(it.imageRef).catch(() => {});
-      if (it.inputImageRef) deleteImage(it.inputImageRef).catch(() => {});
+      if (it.inputImageRefs) it.inputImageRefs.forEach(ref => deleteImage(ref).catch(() => {}));
     }
 
     const keptItems = conv.items.slice(0, idx);
@@ -428,23 +444,37 @@ const App: React.FC = () => {
         : c
     ));
 
-    // 用编辑后的 prompt 和原 item 参数重新生成
+    // 用编辑后的 prompt 和参考图重新生成
     const editedItem = conv.items[idx];
     handleGenerate({
       prompt: newPrompt,
-      mode: editedItem.mode,
+      mode: inputImages?.length ? 'img2img' : 'text2img',
       aspectRatio: editedItem.aspectRatio,
       size: editedItem.size,
       styleId: 'none',
+      inputImages,
     });
   }, [activeConvId, conversations, generatingConvIds, handleGenerate]);
 
-  const handleRegenerateItem = useCallback((itemId: string) => {
+  const handleRegenerateItem = useCallback(async (itemId: string) => {
     if (!activeConvId) return;
     const conv = conversations.find(c => c.id === activeConvId);
     const item = conv?.items.find(g => g.id === itemId);
     if (!item) return;
-    handleEditItem(itemId, item.prompt);
+    // 加载原始参考图数据
+    let inputImages: Array<{ data: string; mimeType: string }> | undefined;
+    if (item.inputImageRefs?.length) {
+      const loaded: Array<{ data: string; mimeType: string }> = [];
+      for (const ref of item.inputImageRefs) {
+        const imgData = await loadImage(ref);
+        if (imgData) {
+          const match = imgData.match(/^data:(image\/[^;]+);/);
+          loaded.push({ data: imgData, mimeType: match ? match[1] : 'image/png' });
+        }
+      }
+      if (loaded.length > 0) inputImages = loaded;
+    }
+    handleEditItem(itemId, item.prompt, inputImages);
   }, [activeConvId, conversations, handleEditItem]);
 
   // ── Render ─────────────────────────────────────────────
@@ -499,7 +529,7 @@ const App: React.FC = () => {
           items={activeItems}
           isGenerating={isGenerating}
           currentPrompt={currentPrompt}
-          currentInputImage={currentInputImage}
+          currentInputImages={currentInputImages}
           onEditItem={handleEditItem}
           onRegenerateItem={handleRegenerateItem}
         />

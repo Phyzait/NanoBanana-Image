@@ -4,15 +4,15 @@ import React, { useEffect, useRef, useState, useCallback } from 'react';
 import type { Theme, GalleryItem } from '../types';
 import { IMAGE_MODELS } from '../constants';
 import { loadImage } from '../services/imageStore';
-import { ArrowDownTrayIcon, XMarkIcon, PencilIcon, CheckIcon, ArrowPathIcon } from './Icons';
+import { ArrowDownTrayIcon, XMarkIcon, PencilIcon, CheckIcon, ArrowPathIcon, PhotoIcon } from './Icons';
 
 interface ImageGalleryProps {
   theme: Theme;
   items: GalleryItem[];
   isGenerating: boolean;
   currentPrompt?: string;
-  currentInputImage?: string;
-  onEditItem?: (itemId: string, newPrompt: string) => void;
+  currentInputImages?: Array<{ data: string; mimeType: string }>;
+  onEditItem?: (itemId: string, newPrompt: string, inputImages?: Array<{ data: string; mimeType: string }>) => void;
   onRegenerateItem?: (itemId: string) => void;
 }
 
@@ -93,15 +93,17 @@ const GalleryCard: React.FC<{
   item: GalleryItem;
   theme: Theme;
   onPreview: (src: string) => void;
-  onEdit?: (itemId: string, newPrompt: string) => void;
+  onEdit?: (itemId: string, newPrompt: string, inputImages?: Array<{ data: string; mimeType: string }>) => void;
   onRegenerate?: (itemId: string) => void;
   isGenerating: boolean;
 }> = ({ item, theme, onPreview, onEdit, onRegenerate, isGenerating }) => {
   const [imgSrc, setImgSrc] = useState<string | null>(null);
-  const [inputImgSrc, setInputImgSrc] = useState<string | null>(null);
+  const [inputImgSrcs, setInputImgSrcs] = useState<string[]>([]);
   const [isEditing, setIsEditing] = useState(false);
   const [editText, setEditText] = useState('');
+  const [editInputImages, setEditInputImages] = useState<Array<{ data: string; mimeType: string }>>([]);
   const editRef = useRef<HTMLTextAreaElement>(null);
+  const editFileInputRef = useRef<HTMLInputElement>(null);
   const isDark = theme === 'dark';
   const isError = !!item.error;
 
@@ -110,8 +112,12 @@ const GalleryCard: React.FC<{
   }, [item.imageRef]);
 
   useEffect(() => {
-    if (item.inputImageRef) loadImage(item.inputImageRef).then(setInputImgSrc);
-  }, [item.inputImageRef]);
+    if (item.inputImageRefs?.length) {
+      Promise.all(item.inputImageRefs.map(ref => loadImage(ref))).then(srcs =>
+        setInputImgSrcs(srcs.filter((s): s is string => !!s))
+      );
+    }
+  }, [item.inputImageRefs]);
 
   const handleDownload = useCallback(() => {
     if (!imgSrc) return;
@@ -129,6 +135,15 @@ const GalleryCard: React.FC<{
 
   const handleStartEdit = useCallback(() => {
     setEditText(item.prompt);
+    // 初始化参考图编辑状态
+    if (inputImgSrcs.length > 0) {
+      setEditInputImages(inputImgSrcs.map(src => {
+        const match = src.match(/^data:(image\/[^;]+);/);
+        return { data: src, mimeType: match ? match[1] : 'image/png' };
+      }));
+    } else {
+      setEditInputImages([]);
+    }
     setIsEditing(true);
     requestAnimationFrame(() => {
       if (editRef.current) {
@@ -137,18 +152,19 @@ const GalleryCard: React.FC<{
         editRef.current.style.height = `${editRef.current.scrollHeight}px`;
       }
     });
-  }, [item.prompt]);
+  }, [item.prompt, inputImgSrcs]);
 
   const handleConfirmEdit = useCallback(() => {
     const trimmed = editText.trim();
     if (!trimmed || !onEdit) return;
     setIsEditing(false);
-    onEdit(item.id, trimmed);
-  }, [editText, onEdit, item.id]);
+    onEdit(item.id, trimmed, editInputImages.length > 0 ? editInputImages : undefined);
+  }, [editText, onEdit, item.id, editInputImages]);
 
   const handleCancelEdit = useCallback(() => {
     setIsEditing(false);
     setEditText('');
+    setEditInputImages([]);
   }, []);
 
   const handleEditKeyDown = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -160,6 +176,37 @@ const GalleryCard: React.FC<{
       handleCancelEdit();
     }
   }, [handleConfirmEdit, handleCancelEdit]);
+
+  const handleEditImageUpload = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !file.type.startsWith('image/')) return;
+    const mimeType = file.type;
+    const reader = new FileReader();
+    reader.onload = () => {
+      setEditInputImages(prev => [...prev, { data: reader.result as string, mimeType }]);
+    };
+    reader.readAsDataURL(file);
+    e.target.value = '';
+  }, []);
+
+  const handleEditPaste = useCallback((e: React.ClipboardEvent) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    for (const item of items) {
+      if (item.type.startsWith('image/')) {
+        e.preventDefault();
+        const file = item.getAsFile();
+        if (!file) continue;
+        const mimeType = file.type;
+        const reader = new FileReader();
+        reader.onload = () => {
+          setEditInputImages(prev => [...prev, { data: reader.result as string, mimeType }]);
+        };
+        reader.readAsDataURL(file);
+        return;
+      }
+    }
+  }, []);
 
   return (
     <div className="animate-fadeIn">
@@ -191,6 +238,7 @@ const GalleryCard: React.FC<{
                   e.target.style.height = `${e.target.scrollHeight}px`;
                 }}
                 onKeyDown={handleEditKeyDown}
+                onPaste={handleEditPaste}
                 className={`w-full resize-none rounded-lg px-2 py-1.5 text-xs sm:text-sm focus:outline-none focus:ring-1 ${
                   isDark
                     ? 'bg-[#1e1e1c] text-amber-100 focus:ring-amber-500/50 border border-amber-500/30'
@@ -198,6 +246,31 @@ const GalleryCard: React.FC<{
                 }`}
                 style={{ minHeight: '36px' }}
               />
+              {/* 参考图编辑区域 */}
+              <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+                {editInputImages.map((img, idx) => (
+                  <div key={idx} className="relative group/ref flex-shrink-0">
+                    <img src={img.data} alt={`参考图 ${idx + 1}`} className="h-12 rounded-md object-cover" />
+                    <button
+                      onClick={() => setEditInputImages(prev => prev.filter((_, i) => i !== idx))}
+                      className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-red-500 text-white flex items-center justify-center opacity-0 group-hover/ref:opacity-100 transition-opacity"
+                    >
+                      <XMarkIcon className="w-2.5 h-2.5" />
+                    </button>
+                  </div>
+                ))}
+                <button
+                  onClick={() => editFileInputRef.current?.click()}
+                  className={`flex items-center gap-1 px-1.5 py-1 rounded-md text-[11px] transition-colors ${
+                    isDark ? 'text-gray-400 hover:bg-gray-700/50 hover:text-gray-300' : 'text-gray-500 hover:bg-gray-100 hover:text-gray-600'
+                  }`}
+                  title="添加参考图"
+                >
+                  <PhotoIcon className="w-3.5 h-3.5" />
+                  参考图
+                </button>
+                <input ref={editFileInputRef} type="file" accept="image/*" className="hidden" onChange={handleEditImageUpload} />
+              </div>
               <div className="flex items-center justify-end gap-1.5 mt-1.5">
                 <button
                   onClick={handleCancelEdit}
@@ -225,15 +298,18 @@ const GalleryCard: React.FC<{
             <>
               <p className="whitespace-pre-wrap break-words">{item.prompt}</p>
               {/* img2img 输入图展示 */}
-              {inputImgSrc && (
-                <div className="mt-2">
-                  <img
-                    src={inputImgSrc}
-                    alt="参考图"
-                    className="h-20 sm:h-24 rounded-lg object-cover cursor-pointer hover:opacity-80 transition-opacity"
-                    onClick={() => onPreview(inputImgSrc)}
-                  />
-                  <span className={`text-[10px] mt-0.5 block ${isDark ? 'text-amber-400/50' : 'text-amber-600/50'}`}>参考图</span>
+              {inputImgSrcs.length > 0 && (
+                <div className="mt-2 flex gap-1.5 flex-wrap">
+                  {inputImgSrcs.map((src, idx) => (
+                    <img
+                      key={idx}
+                      src={src}
+                      alt={`参考图 ${idx + 1}`}
+                      className="h-20 sm:h-24 rounded-lg object-cover cursor-pointer hover:opacity-80 transition-opacity"
+                      onClick={() => onPreview(src)}
+                    />
+                  ))}
+                  <span className={`text-[10px] mt-0.5 block w-full ${isDark ? 'text-amber-400/50' : 'text-amber-600/50'}`}>参考图</span>
                 </div>
               )}
               <div className={`flex items-center gap-2 mt-1 sm:mt-1.5 text-[10px] ${isDark ? 'text-amber-400/60' : 'text-amber-600/60'}`}>
@@ -359,7 +435,7 @@ const GalleryCard: React.FC<{
 
 /* ── 主组件 ────────────────────────────────── */
 
-const ImageGallery: React.FC<ImageGalleryProps> = ({ theme, items, isGenerating, currentPrompt, currentInputImage, onEditItem, onRegenerateItem }) => {
+const ImageGallery: React.FC<ImageGalleryProps> = ({ theme, items, isGenerating, currentPrompt, currentInputImages, onEditItem, onRegenerateItem }) => {
   const scrollRef = useRef<HTMLDivElement>(null);
   const isDark = theme === 'dark';
   const [previewSrc, setPreviewSrc] = useState<string | null>(null);
@@ -430,10 +506,12 @@ const ImageGallery: React.FC<ImageGalleryProps> = ({ theme, items, isGenerating,
                     isDark ? 'bg-amber-900/30 text-amber-100' : 'bg-amber-50 text-amber-900'
                   }`}>
                     {currentPrompt}
-                    {currentInputImage && (
-                      <div className="mt-2">
-                        <img src={currentInputImage} alt="参考图" className="h-20 sm:h-24 rounded-lg object-cover" />
-                        <span className={`text-[10px] mt-0.5 block ${isDark ? 'text-amber-400/50' : 'text-amber-600/50'}`}>参考图</span>
+                    {currentInputImages && currentInputImages.length > 0 && (
+                      <div className="mt-2 flex gap-1.5 flex-wrap">
+                        {currentInputImages.map((img, idx) => (
+                          <img key={idx} src={img.data} alt={`参考图 ${idx + 1}`} className="h-20 sm:h-24 rounded-lg object-cover" />
+                        ))}
+                        <span className={`text-[10px] mt-0.5 block w-full ${isDark ? 'text-amber-400/50' : 'text-amber-600/50'}`}>参考图</span>
                       </div>
                     )}
                   </div>

@@ -19,8 +19,7 @@ interface PromptBarProps {
     aspectRatio: string;
     size: string;
     styleId: string;
-    inputImage?: string;
-    inputImageMimeType?: string;
+    inputImages?: Array<{ data: string; mimeType: string }>;
   }) => void;
   onCancel: () => void;
   onMessage: (title: string, message: string, variant?: 'info' | 'warning' | 'error') => void;
@@ -34,8 +33,7 @@ const PromptBar: React.FC<PromptBarProps> = ({ theme, isGenerating, model, optim
   const [styleId, setStyleId] = useState('none');
   const [isOptimizing, setIsOptimizing] = useState(false);
   const [optimizePresetId, setOptimizePresetId] = useState('default');
-  const [inputImage, setInputImage] = useState<string | undefined>();
-  const [inputImageMimeType, setInputImageMimeType] = useState<string | undefined>();
+  const [inputImages, setInputImages] = useState<Array<{ data: string; mimeType: string }>>([]);
   const [showOptimizePresets, setShowOptimizePresets] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
 
@@ -46,10 +44,10 @@ const PromptBar: React.FC<PromptBarProps> = ({ theme, isGenerating, model, optim
   // ── 图片处理通用方法 ─────────────────────────────
   const processImageFile = useCallback((file: File) => {
     if (!file.type.startsWith('image/')) return;
-    setInputImageMimeType(file.type);
+    const mimeType = file.type;
     const reader = new FileReader();
     reader.onload = () => {
-      setInputImage(reader.result as string);
+      setInputImages(prev => [...prev, { data: reader.result as string, mimeType }]);
       setMode('img2img');
     };
     reader.readAsDataURL(file);
@@ -108,13 +106,11 @@ const PromptBar: React.FC<PromptBarProps> = ({ theme, isGenerating, model, optim
       aspectRatio,
       size,
       styleId,
-      inputImage,
-      inputImageMimeType,
+      inputImages: inputImages.length > 0 ? inputImages : undefined,
     });
     setPrompt('');
-    setInputImage(undefined);
-    setInputImageMimeType(undefined);
-  }, [prompt, isGenerating, onGenerate, mode, aspectRatio, size, styleId, inputImage, inputImageMimeType]);
+    setInputImages([]);
+  }, [prompt, isGenerating, onGenerate, mode, aspectRatio, size, styleId, inputImages]);
 
   const handleOptimize = useCallback(async () => {
     const trimmed = prompt.trim();
@@ -142,8 +138,7 @@ const PromptBar: React.FC<PromptBarProps> = ({ theme, isGenerating, model, optim
 
   const handleClear = useCallback(() => {
     setPrompt('');
-    setInputImage(undefined);
-    setInputImageMimeType(undefined);
+    setInputImages([]);
     setMode('text2img');
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto';
@@ -158,10 +153,12 @@ const PromptBar: React.FC<PromptBarProps> = ({ theme, isGenerating, model, optim
     }
   };
 
-  const removeInputImage = () => {
-    setInputImage(undefined);
-    setInputImageMimeType(undefined);
-    setMode('text2img');
+  const removeInputImage = (index: number) => {
+    setInputImages(prev => {
+      const next = prev.filter((_, i) => i !== index);
+      if (next.length === 0) setMode('text2img');
+      return next;
+    });
   };
 
   const activeStyle = STYLE_PRESETS.find(s => s.id === styleId);
@@ -193,23 +190,23 @@ const PromptBar: React.FC<PromptBarProps> = ({ theme, isGenerating, model, optim
       )}
 
       {/* 上传的图片预览 */}
-      {inputImage && (
+      {inputImages.length > 0 && (
         <div className="px-3 sm:px-4 pt-2.5 sm:pt-3">
-          <div className={`relative inline-flex rounded-xl overflow-hidden border ${isDark ? 'border-gray-600' : 'border-gray-200'}`}>
-            <img
-              src={inputImage}
-              alt="参考图"
-              className="h-24 sm:h-32 max-w-[220px] sm:max-w-[280px] object-cover"
-            />
-            <button
-              onClick={removeInputImage}
-              className="absolute top-1.5 right-1.5 w-6 h-6 rounded-full bg-black/60 text-white flex items-center justify-center hover:bg-black/80 transition-colors"
-            >
-              <XMarkIcon className="w-3.5 h-3.5" />
-            </button>
-            <div className="absolute bottom-0 left-0 right-0 px-2 py-1 bg-gradient-to-t from-black/60 to-transparent">
-              <span className="text-[10px] text-white/80 font-medium">图生图 · 参考图</span>
-            </div>
+          <div className="flex gap-2 overflow-x-auto">
+            {inputImages.map((img, idx) => (
+              <div key={idx} className={`relative flex-shrink-0 rounded-xl overflow-hidden border ${isDark ? 'border-gray-600' : 'border-gray-200'}`}>
+                <img src={img.data} alt={`参考图 ${idx + 1}`} className="h-24 sm:h-32 max-w-[220px] sm:max-w-[280px] object-cover" />
+                <button
+                  onClick={() => removeInputImage(idx)}
+                  className="absolute top-1.5 right-1.5 w-6 h-6 rounded-full bg-black/60 text-white flex items-center justify-center hover:bg-black/80 transition-colors"
+                >
+                  <XMarkIcon className="w-3.5 h-3.5" />
+                </button>
+                <div className="absolute bottom-0 left-0 right-0 px-2 py-1 bg-gradient-to-t from-black/60 to-transparent">
+                  <span className="text-[10px] text-white/80 font-medium">参考图 {inputImages.length > 1 ? idx + 1 : ''}</span>
+                </div>
+              </div>
+            ))}
           </div>
         </div>
       )}
@@ -293,7 +290,7 @@ const PromptBar: React.FC<PromptBarProps> = ({ theme, isGenerating, model, optim
       </div>
 
       {/* 清空按钮 */}
-      {(prompt.trim() || inputImage) && (
+      {(prompt.trim() || inputImages.length > 0) && (
         <div className="px-3 sm:px-4 pb-1 flex justify-end">
           <button
             onClick={handleClear}
@@ -319,7 +316,7 @@ const PromptBar: React.FC<PromptBarProps> = ({ theme, isGenerating, model, optim
             onChange={e => setPrompt(e.target.value)}
             onKeyDown={handleKeyDown}
             onPaste={handlePaste}
-            placeholder={inputImage ? '描述你想要的修改...' : '描述你想要的图片，支持粘贴图片...'}
+            placeholder={inputImages.length > 0 ? '描述你想要的修改...' : '描述你想要的图片，支持粘贴图片...'}
             rows={1}
             className={`w-full px-3 sm:px-4 py-2.5 sm:py-3 rounded-2xl text-[13px] sm:text-sm resize-none bg-transparent focus:outline-none max-h-28 sm:max-h-32 ${
               isDark ? 'text-gray-100 placeholder:text-gray-500' : 'text-gray-900 placeholder:text-gray-400'

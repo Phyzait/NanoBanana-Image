@@ -142,18 +142,20 @@ export async function generateImage(
   // 当前用户消息
   const currentParts: Array<Record<string, unknown>> = [{ text: finalPrompt }];
 
-  if (req.mode === 'img2img' && req.inputImage) {
-    let base64 = req.inputImage;
-    let mimeType = req.inputImageMimeType ?? 'image/jpeg';
-    if (base64.startsWith('data:')) {
-      const [header, data] = base64.split(',');
-      const match = header.match(/data:(image\/\w+);base64/);
-      if (match) mimeType = match[1];
-      base64 = data;
+  if (req.mode === 'img2img' && req.inputImages?.length) {
+    for (const img of req.inputImages) {
+      let base64 = img.data;
+      let mimeType = img.mimeType || 'image/jpeg';
+      if (base64.startsWith('data:')) {
+        const [header, data] = base64.split(',');
+        const match = header.match(/data:(image\/\w+);base64/);
+        if (match) mimeType = match[1];
+        base64 = data;
+      }
+      currentParts.push({
+        inline_data: { mime_type: mimeType, data: base64 },
+      });
     }
-    currentParts.push({
-      inline_data: { mime_type: mimeType, data: base64 },
-    });
   }
 
   contents.push({ role: 'user', parts: currentParts });
