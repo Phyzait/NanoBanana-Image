@@ -430,6 +430,14 @@ const App: React.FC = () => {
     });
   }, [activeConvId, conversations, isGenerating, handleGenerate]);
 
+  const handleRegenerateItem = useCallback((itemId: string) => {
+    if (!activeConvId) return;
+    const conv = conversations.find(c => c.id === activeConvId);
+    const item = conv?.items.find(g => g.id === itemId);
+    if (!item) return;
+    handleEditItem(itemId, item.prompt);
+  }, [activeConvId, conversations, handleEditItem]);
+
   // ── Render ─────────────────────────────────────────────
 
   if (!apiKey || showApiSetup) {
@@ -483,6 +491,7 @@ const App: React.FC = () => {
           currentPrompt={currentPrompt}
           currentInputImage={currentInputImage}
           onEditItem={handleEditItem}
+          onRegenerateItem={handleRegenerateItem}
         />
         <PromptBar
           theme={theme}

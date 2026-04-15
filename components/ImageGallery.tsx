@@ -4,7 +4,7 @@ import React, { useEffect, useRef, useState, useCallback } from 'react';
 import type { Theme, GalleryItem } from '../types';
 import { IMAGE_MODELS } from '../constants';
 import { loadImage } from '../services/imageStore';
-import { ArrowDownTrayIcon, XMarkIcon, PencilIcon, CheckIcon } from './Icons';
+import { ArrowDownTrayIcon, XMarkIcon, PencilIcon, CheckIcon, ArrowPathIcon } from './Icons';
 
 interface ImageGalleryProps {
   theme: Theme;
@@ -13,6 +13,7 @@ interface ImageGalleryProps {
   currentPrompt?: string;
   currentInputImage?: string;
   onEditItem?: (itemId: string, newPrompt: string) => void;
+  onRegenerateItem?: (itemId: string) => void;
 }
 
 /* ── 成功小动画 — 对勾弹出 + 星星粒子 ──────── */
@@ -93,8 +94,9 @@ const GalleryCard: React.FC<{
   theme: Theme;
   onPreview: (src: string) => void;
   onEdit?: (itemId: string, newPrompt: string) => void;
+  onRegenerate?: (itemId: string) => void;
   isGenerating: boolean;
-}> = ({ item, theme, onPreview, onEdit, isGenerating }) => {
+}> = ({ item, theme, onPreview, onEdit, onRegenerate, isGenerating }) => {
   const [imgSrc, setImgSrc] = useState<string | null>(null);
   const [inputImgSrc, setInputImgSrc] = useState<string | null>(null);
   const [isEditing, setIsEditing] = useState(false);
@@ -335,13 +337,29 @@ const GalleryCard: React.FC<{
         </div>
         )}
       </div>
+
+      {/* 重新生成按钮 */}
+      {!isGenerating && onRegenerate && (
+        <div className="flex justify-start mb-4">
+          <button
+            onClick={() => onRegenerate(item.id)}
+            className={`flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] transition-colors ${
+              isDark ? 'text-gray-500 hover:text-gray-300 hover:bg-gray-700/40' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'
+            }`}
+            title="重新生成"
+          >
+            <ArrowPathIcon className="w-3.5 h-3.5" />
+            <span>重新生成</span>
+          </button>
+        </div>
+      )}
     </div>
   );
 };
 
 /* ── 主组件 ────────────────────────────────── */
 
-const ImageGallery: React.FC<ImageGalleryProps> = ({ theme, items, isGenerating, currentPrompt, currentInputImage, onEditItem }) => {
+const ImageGallery: React.FC<ImageGalleryProps> = ({ theme, items, isGenerating, currentPrompt, currentInputImage, onEditItem, onRegenerateItem }) => {
   const scrollRef = useRef<HTMLDivElement>(null);
   const isDark = theme === 'dark';
   const [previewSrc, setPreviewSrc] = useState<string | null>(null);
@@ -400,7 +418,7 @@ const ImageGallery: React.FC<ImageGalleryProps> = ({ theme, items, isGenerating,
 
           {/* 图片列表 */}
           {items.map(item => (
-            <GalleryCard key={item.id} item={item} theme={theme} onPreview={setPreviewSrc} onEdit={onEditItem} isGenerating={isGenerating} />
+            <GalleryCard key={item.id} item={item} theme={theme} onPreview={setPreviewSrc} onEdit={onEditItem} onRegenerate={onRegenerateItem} isGenerating={isGenerating} />
           ))}
 
           {/* 生成中状态 */}
