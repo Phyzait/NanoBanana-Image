@@ -16,8 +16,11 @@ const Thumbnail: React.FC<{
   const [src, setSrc] = useState<string | null>(null);
 
   useEffect(() => {
-    loadImage(item.imageRef).then(setSrc);
+    if (item.imageRef) loadImage(item.imageRef).then(setSrc);
   }, [item.imageRef]);
+
+  // 跳过错误记录，不在历史画廊中展示
+  if (item.error) return null;
 
   const modelName = IMAGE_MODELS.find(m => m.id === item.model)?.name || 'NanoBanana Pro';
   const elapsedStr = item.elapsed < 1000 ? `${item.elapsed}ms` : `${(item.elapsed / 1000).toFixed(1)}s`;

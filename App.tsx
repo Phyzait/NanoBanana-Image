@@ -182,7 +182,7 @@ const App: React.FC = () => {
     if (!conv) return;
     // 清理 IndexedDB 图片
     for (const item of conv.items) {
-      deleteImage(item.imageRef).catch(() => {});
+      if (item.imageRef) deleteImage(item.imageRef).catch(() => {});
       if (item.inputImageRef) deleteImage(item.inputImageRef).catch(() => {});
     }
     setConversations(prev => prev.filter(c => c.id !== id));
@@ -197,7 +197,7 @@ const App: React.FC = () => {
     showConfirm('清空所有对话', '确定要删除所有对话记录吗？此操作不可撤销。', () => {
       for (const conv of conversations) {
         for (const item of conv.items) {
-          deleteImage(item.imageRef).catch(() => {});
+          if (item.imageRef) deleteImage(item.imageRef).catch(() => {});
           if (item.inputImageRef) deleteImage(item.inputImageRef).catch(() => {});
         }
       }
@@ -212,7 +212,7 @@ const App: React.FC = () => {
     const item = conv?.items.find(g => g.id === id);
     if (!item) return;
     try {
-      await deleteImage(item.imageRef);
+      if (item.imageRef) await deleteImage(item.imageRef);
       if (item.inputImageRef) await deleteImage(item.inputImageRef);
     } catch (e) {
       console.warn('删除图片失败:', e);
@@ -325,11 +325,57 @@ const App: React.FC = () => {
             : c
         ));
       } else {
+        // 失败也保留用户消息，附带错误信息
+        const errorItem: GalleryItem = {
+          id: genId(),
+          timestamp: Date.now(),
+          prompt: params.prompt,
+          aspectRatio: params.aspectRatio,
+          size: params.size,
+          mode: params.mode,
+          model,
+          elapsed: result.elapsed,
+          inputImageRef,
+          error: result.error || '未知错误',
+        };
+        setConversations(prev => prev.map(c =>
+          c.id === convId
+            ? {
+                ...c,
+                items: [...c.items, errorItem],
+                updatedAt: Date.now(),
+                title: c.items.length === 0 ? params.prompt.slice(0, 30) : c.title,
+              }
+            : c
+        ));
         showMessage('生成失败', result.error || '未知错误', 'error');
       }
     } catch (e: unknown) {
       if (e instanceof DOMException && e.name === 'AbortError') return;
-      showMessage('生成出错', e instanceof Error ? e.message : String(e), 'error');
+      const errMsg = e instanceof Error ? e.message : String(e);
+      // 异常也保留用户消息
+      const errorItem: GalleryItem = {
+        id: genId(),
+        timestamp: Date.now(),
+        prompt: params.prompt,
+        aspectRatio: params.aspectRatio,
+        size: params.size,
+        mode: params.mode,
+        model,
+        elapsed: Date.now() - Date.now(),
+        error: errMsg,
+      };
+      setConversations(prev => prev.map(c =>
+        c.id === convId
+          ? {
+              ...c,
+              items: [...c.items, errorItem],
+              updatedAt: Date.now(),
+              title: c.items.length === 0 ? params.prompt.slice(0, 30) : c.title,
+            }
+          : c
+      ));
+      showMessage('生成出错', errMsg, 'error');
     } finally {
       setIsGenerating(false);
       setCurrentPrompt(undefined);

@@ -55,11 +55,13 @@ export interface GalleryItem {
   size: string;
   mode: ImageGenMode;
   model: ImageModel;
-  /** IndexedDB 引用或 base64 data URI */
-  imageRef: string;
+  /** IndexedDB 引用或 base64 data URI（生成失败时为空） */
+  imageRef?: string;
   elapsed: number;
   /** 输入图片引用（img2img） */
   inputImageRef?: string;
+  /** 生成失败时的错误信息 */
+  error?: string;
 }
 
 /** 一个对话会话 */

@@ -26,7 +26,7 @@ const HistoryCard: React.FC<{
   const isDark = theme === 'dark';
 
   useEffect(() => {
-    loadImage(item.imageRef).then(src => setThumbSrc(src));
+    if (item.imageRef) loadImage(item.imageRef).then(src => setThumbSrc(src));
   }, [item.imageRef]);
 
   const modelName = IMAGE_MODELS.find(m => m.id === item.model)?.name || 'NanoBanana Pro';
@@ -100,7 +100,7 @@ const ImagePreviewModal: React.FC<{
   const [imgSrc, setImgSrc] = useState<string | null>(null);
 
   useEffect(() => {
-    if (item) {
+    if (item?.imageRef) {
       loadImage(item.imageRef).then(src => setImgSrc(src));
     } else {
       setImgSrc(null);

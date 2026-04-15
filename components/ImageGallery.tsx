@@ -91,9 +91,10 @@ const GalleryCard: React.FC<{ item: GalleryItem; theme: Theme; onPreview: (src: 
   const [imgSrc, setImgSrc] = useState<string | null>(null);
   const [inputImgSrc, setInputImgSrc] = useState<string | null>(null);
   const isDark = theme === 'dark';
+  const isError = !!item.error;
 
   useEffect(() => {
-    loadImage(item.imageRef).then(setImgSrc);
+    if (item.imageRef) loadImage(item.imageRef).then(setImgSrc);
   }, [item.imageRef]);
 
   useEffect(() => {
@@ -157,23 +158,41 @@ const GalleryCard: React.FC<{ item: GalleryItem; theme: Theme; onPreview: (src: 
       {/* 生成结果头部 — 模型 | 渠道 + 完成状态 */}
       <div className="flex justify-start mb-1.5">
         <div className="flex items-center gap-2">
-          <SuccessSparkle isDark={isDark} />
+          {isError ? (
+            <span className="inline-flex items-center justify-center w-5 h-5 sm:w-6 sm:h-6 flex-shrink-0">
+              <svg viewBox="0 0 20 20" className="w-4 h-4 sm:w-5 sm:h-5" fill="none">
+                <circle cx="10" cy="10" r="9" className={isDark ? 'fill-red-500/20' : 'fill-red-100'} />
+                <path d="M7 7 L13 13 M13 7 L7 13" stroke={isDark ? '#ef4444' : '#dc2626'} strokeWidth="1.8" strokeLinecap="round" />
+              </svg>
+            </span>
+          ) : (
+            <SuccessSparkle isDark={isDark} />
+          )}
           <div className="flex flex-col">
             <div className="flex items-center gap-1.5 text-xs sm:text-sm">
-              <span className={`font-medium ${isDark ? 'text-amber-400' : 'text-amber-600'}`}>{modelName}</span>
+              <span className={`font-medium ${isError ? (isDark ? 'text-red-400' : 'text-red-600') : (isDark ? 'text-amber-400' : 'text-amber-600')}`}>{modelName}</span>
               <span className={isDark ? 'text-gray-600' : 'text-gray-300'}>|</span>
               <span className={isDark ? 'text-gray-400' : 'text-gray-500'}>IkunCode</span>
             </div>
             <span className={`text-[11px] sm:text-xs ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>
-              图片生成完成
-              <span className={`ml-1.5 tabular-nums ${isDark ? 'text-amber-400/60' : 'text-amber-600/60'}`}>({elapsedStr})</span>
+              {isError ? '生成失败' : '图片生成完成'}
+              {!isError && (
+                <span className={`ml-1.5 tabular-nums ${isDark ? 'text-amber-400/60' : 'text-amber-600/60'}`}>({elapsedStr})</span>
+              )}
             </span>
           </div>
         </div>
       </div>
 
-      {/* AI 生成的图片 */}
+      {/* AI 生成的图片 / 错误信息 */}
       <div className="flex justify-start mb-4">
+        {isError ? (
+          <div className={`max-w-[90%] sm:max-w-[85%] rounded-2xl rounded-tl-md px-4 py-3 ${
+            isDark ? 'bg-red-900/20 border border-red-800/30' : 'bg-red-50 border border-red-200'
+          }`}>
+            <p className={`text-xs sm:text-sm ${isDark ? 'text-red-300' : 'text-red-600'}`}>{item.error}</p>
+          </div>
+        ) : (
         <div className={`max-w-[90%] sm:max-w-[85%] rounded-2xl rounded-tl-md overflow-hidden shadow-lg ${
           isDark ? 'bg-[#2a2a28]' : 'bg-white'
         }`}>
@@ -213,6 +232,7 @@ const GalleryCard: React.FC<{ item: GalleryItem; theme: Theme; onPreview: (src: 
             <span>{elapsedStr}</span>
           </div>
         </div>
+        )}
       </div>
     </div>
   );
