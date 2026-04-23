@@ -2,7 +2,8 @@
 
 export type Theme = 'light' | 'dark';
 export type ImageGenMode = 'text2img' | 'img2img';
-export type ImageModel = 'nano-banana' | 'nano-banana-2';
+export type ImageModel = 'nano-banana' | 'nano-banana-2' | 'gpt-image-2';
+export type ImageProvider = 'gemini' | 'openai-image';
 
 /** 提示词优化 API 配置（OpenAI 兼容格式） */
 export interface OptimizeConfig {
@@ -50,7 +51,13 @@ export interface ImageModelConfig {
   id: ImageModel;
   name: string;
   description: string;
+  provider: ImageProvider;
+  /** gemini: 完整路径 `/v1beta/models/<id>:generateContent`；openai-image: 生成端点 `/v1/images/generations` */
   modelPath: string;
+  /** openai-image 专用：编辑端点 `/v1/images/edits` */
+  editsPath?: string;
+  /** openai-image 专用：模型 id（body.model），与路由 id 解耦 */
+  apiModelId?: string;
 }
 
 /** 一条图片生成记录（展示在画廊中） */

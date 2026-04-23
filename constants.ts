@@ -12,19 +12,30 @@ export function normalizeBaseUrl(baseUrl?: string): string {
   return (baseUrl?.trim() || DEFAULT_BASE_URL).replace(/\/+$/, '');
 }
 
-// ── 双模型配置 ────────────────────────────────────────────
+// ── 三模型配置 ────────────────────────────────────────────
 export const IMAGE_MODELS: ImageModelConfig[] = [
   {
     id: 'nano-banana',
     name: 'NanoBanana Pro',
     description: 'Gemini 3 Pro · 效果最佳 · 较慢',
+    provider: 'gemini',
     modelPath: '/v1beta/models/gemini-3-pro-image-preview:generateContent',
   },
   {
     id: 'nano-banana-2',
     name: 'NanoBanana 2',
     description: 'Gemini 3.1 Flash · 速度快 · 价格低',
+    provider: 'gemini',
     modelPath: '/v1beta/models/gemini-3.1-flash-image-preview:generateContent',
+  },
+  {
+    id: 'gpt-image-2',
+    name: 'GPT Image 2',
+    description: 'OpenAI · 指令遵循强 · 原生文字渲染',
+    provider: 'openai-image',
+    modelPath: '/v1/images/generations',
+    editsPath: '/v1/images/edits',
+    apiModelId: 'gpt-image-2',
   },
 ];
 

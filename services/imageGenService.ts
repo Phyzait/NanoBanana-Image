@@ -1,7 +1,7 @@
 // services/imageGenService.ts
-// NanoBanana 图像生成服务 — 双模型，提示词优化走 OpenAI 兼容格式
+// 图像生成服务 — 支持 Gemini (NanoBanana) 与 OpenAI Image (gpt-image-2) 两种协议
 
-import type { ImageGenRequest, ImageGenResult, OptimizeConfig } from '../types';
+import type { ImageGenRequest, ImageGenResult, ImageModelConfig, OptimizeConfig } from '../types';
 import { IMAGE_MODELS, IMAGE_OPTIMIZE_PRESETS, normalizeBaseUrl } from '../constants';
 
 // ── 通用工具 ──────────────────────────────────────────────
@@ -85,6 +85,159 @@ export async function optimizePrompt(
   return text;
 }
 
+// ── gpt-image-2 辅助 ──────────────────────────────────────
+
+/**
+ * 把应用里的 aspectRatio + size 档位（1K/2K/4K）映射到 gpt-image-2 要求的像素尺寸字符串。
+ * 约束：两边为 16 的倍数；长边 ≤ 3840；总像素 ∈ [655360, 8294400]；长短边比 ≤ 3:1。
+ * aspectRatio=Auto 返回 "auto"。
+ */
+export function mapToGptImage2Size(aspectRatio: string, sizeBucket?: string): string {
+  if (!aspectRatio || aspectRatio === 'Auto') return 'auto';
+  const m = aspectRatio.match(/^(\d+):(\d+)$/);
+  if (!m) return 'auto';
+  const rw = parseInt(m[1], 10);
+  const rh = parseInt(m[2], 10);
+  if (!rw || !rh) return 'auto';
+
+  const base = sizeBucket === '4K' ? 3840 : sizeBucket === '2K' ? 2048 : 1024;
+  const align16 = (n: number) => Math.max(16, Math.round(n / 16) * 16);
+
+  let w: number;
+  let h: number;
+  if (rw >= rh) {
+    w = base;
+    h = align16(base * rh / rw);
+  } else {
+    h = base;
+    w = align16(base * rw / rh);
+  }
+  w = align16(w);
+
+  const MAX_PX = 8_294_400;
+  const MIN_PX = 655_360;
+  const MAX_EDGE = 3840;
+
+  let guard = 20;
+  while ((w * h > MAX_PX || w > MAX_EDGE || h > MAX_EDGE) && guard-- > 0) {
+    const scale = Math.min(MAX_EDGE / Math.max(w, h), Math.sqrt(MAX_PX / (w * h)));
+    w = align16(w * scale);
+    h = align16(h * scale);
+  }
+  guard = 20;
+  while (w * h < MIN_PX && guard-- > 0) {
+    w = align16(w * 1.1);
+    h = align16(h * 1.1);
+  }
+  return `${w}x${h}`;
+}
+
+function stripDataUriPrefix(input: string): { mimeType: string; base64: string } {
+  if (input.startsWith('data:')) {
+    const [header, data] = input.split(',');
+    const match = header.match(/data:(image\/[\w+.-]+);base64/);
+    return { mimeType: match ? match[1] : 'image/png', base64: data };
+  }
+  return { mimeType: 'image/png', base64: input };
+}
+
+function base64ToBlob(base64: string, mimeType: string): Blob {
+  const binary = atob(base64);
+  const len = binary.length;
+  const bytes = new Uint8Array(len);
+  for (let i = 0; i < len; i++) bytes[i] = binary.charCodeAt(i);
+  return new Blob([bytes], { type: mimeType });
+}
+
+function mimeExt(mimeType: string): string {
+  const t = mimeType.toLowerCase();
+  if (t.includes('jpeg') || t.includes('jpg')) return 'jpg';
+  if (t.includes('webp')) return 'webp';
+  return 'png';
+}
+
+async function callGptImage2(
+  apiKey: string,
+  baseUrl: string,
+  modelCfg: ImageModelConfig,
+  req: ImageGenRequest,
+  finalPrompt: string,
+  signal: AbortSignal,
+): Promise<{ mimeType: string; base64: string }> {
+  const base = normalizeBaseUrl(baseUrl);
+  const size = mapToGptImage2Size(req.aspectRatio, req.size);
+  const quality = req.size === '1K' ? 'low' : req.size === '4K' ? 'high' : 'medium';
+  const apiModelId = modelCfg.apiModelId || 'gpt-image-2';
+
+  const hasRefImages = req.mode === 'img2img' && (req.inputImages?.length ?? 0) > 0;
+
+  let res: Response;
+  if (hasRefImages) {
+    const form = new FormData();
+    form.append('model', apiModelId);
+    form.append('prompt', finalPrompt);
+    if (size !== 'auto') form.append('size', size);
+    form.append('quality', quality);
+    form.append('n', '1');
+    form.append('output_format', 'png');
+    // OpenAI 规范：多图用 image[] 字段，最多 16 张
+    const imgs = (req.inputImages ?? []).slice(0, 16);
+    imgs.forEach((img, idx) => {
+      const { mimeType, base64 } = stripDataUriPrefix(img.data);
+      const blob = base64ToBlob(base64, img.mimeType || mimeType);
+      form.append('image[]', blob, `ref_${idx}.${mimeExt(img.mimeType || mimeType)}`);
+    });
+    res = await fetchWithRetry(
+      `${base}${modelCfg.editsPath || '/v1/images/edits'}`,
+      { method: 'POST', headers: { Authorization: `Bearer ${apiKey}` }, body: form },
+      2,
+      signal,
+    );
+  } else {
+    const body: Record<string, unknown> = {
+      model: apiModelId,
+      prompt: finalPrompt,
+      n: 1,
+      output_format: 'png',
+      quality,
+    };
+    if (size !== 'auto') body.size = size;
+    res = await fetchWithRetry(
+      `${base}${modelCfg.modelPath}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+        body: JSON.stringify(body),
+      },
+      2,
+      signal,
+    );
+  }
+
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new Error(`API 错误 ${res.status}: ${errText}`);
+  }
+
+  const json = await res.json();
+  const item = json?.data?.[0];
+  const b64 = item?.b64_json as string | undefined;
+  if (b64) return { mimeType: 'image/png', base64: b64 };
+
+  // 少数中转会直接返回 url，补个兜底（仍然尽量返回 base64）
+  const url = item?.url as string | undefined;
+  if (url) {
+    const imgRes = await fetch(url, { signal });
+    if (!imgRes.ok) throw new Error(`下载生成图失败 ${imgRes.status}`);
+    const buf = new Uint8Array(await imgRes.arrayBuffer());
+    let binary = '';
+    for (let i = 0; i < buf.length; i++) binary += String.fromCharCode(buf[i]);
+    return { mimeType: imgRes.headers.get('content-type') || 'image/png', base64: btoa(binary) };
+  }
+
+  throw new Error('响应中无图片数据');
+}
+
 // ── 图片生成 ──────────────────────────────────────────────
 
 export async function generateImage(
@@ -109,7 +262,36 @@ export async function generateImage(
       finalPrompt = optimizedPrompt;
     } catch (e: unknown) {
       if (e instanceof DOMException && e.name === 'AbortError') throw e;
-      console.warn('[NanoBanana] 提示词优化失败，使用原始提示词:', e);
+      console.warn('[ImageGen] 提示词优化失败，使用原始提示词:', e);
+    }
+  }
+
+  // 2.5 按 provider 分流
+  const timeoutMs = req.size === '4K' ? 1200000 : req.size === '1K' ? 360000 : 600000;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  const combinedSignal = signal
+    ? (AbortSignal as unknown as { any?: (signals: AbortSignal[]) => AbortSignal }).any?.([signal, controller.signal]) ?? controller.signal
+    : controller.signal;
+
+  if (modelCfg.provider === 'openai-image') {
+    try {
+      const { mimeType, base64 } = await callGptImage2(apiKey, baseUrl, modelCfg, req, finalPrompt, combinedSignal);
+      clearTimeout(timeout);
+      return {
+        success: true,
+        imageData: `data:${mimeType};base64,${base64}`,
+        elapsed: Date.now() - start,
+        optimizedPrompt,
+      };
+    } catch (e: unknown) {
+      clearTimeout(timeout);
+      if (e instanceof DOMException && e.name === 'AbortError' && signal?.aborted) throw e;
+      return {
+        success: false,
+        elapsed: Date.now() - start,
+        error: `生成失败: ${e instanceof Error ? e.message : String(e)}`,
+      };
     }
   }
 
@@ -176,16 +358,8 @@ export async function generateImage(
     },
   });
 
-  // 4. 调用 API
+  // 4. 调用 API（gemini 分支沿用前面已创建的 controller/timeout/combinedSignal）
   const url = `${normalizeBaseUrl(baseUrl)}${modelCfg.modelPath}`;
-  const timeoutMs = req.size === '4K' ? 1200000 : req.size === '1K' ? 360000 : 600000;
-
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
-
-  const combinedSignal = signal
-    ? (AbortSignal as unknown as { any?: (signals: AbortSignal[]) => AbortSignal }).any?.([signal, controller.signal]) ?? controller.signal
-    : controller.signal;
 
   try {
     const res = await fetchWithRetry(
